@@ -12,8 +12,26 @@ personale: wearable e parametri corporei, dieta e idratazione, lavoro
 
 ## Setup ambiente (Windows)
 1. JDK 17 (Temurin) — `java -version` deve rispondere 17.x
-2. Android Studio + SDK, variabile ANDROID_HOME impostata
+2. Android Studio + SDK, variabile ANDROID_HOME (o `local.properties` → `sdk.dir`) impostata
+   - Platform richiesta: compileSdk 36, minSdk 26
 3. Verifica: `./gradlew build` da terminale deve essere verde
+
+## Comandi utili
+- `./gradlew build` — build completa di tutti i moduli
+- `./gradlew test` — unit test di tutti i moduli (include Konsist)
+- `./gradlew :konsist-tests:test` — solo i test di architettura (regole di dipendenza §3.1)
+- `./gradlew :app:installDebug` — installa l'app su device/emulatore connesso
+
+## Struttura moduli
+Vedi `docs/implementation-plan.md` §3.1. In sintesi:
+- `:app` — entry point Android, registry statico dei `FeatureModule`, navigazione root
+- `:core:dashboard-api` — contratti `FeatureModule` / `DashboardCardProvider` (zero dipendenze feature)
+- `:core:common` — `Result`, `DispatcherProvider`, `BackgroundScheduler`
+- `:core:designsystem` — tema Notion-style e componenti condivisi (WP-1.1)
+- `:core:database` — RoomDatabase, migrazioni, cifratura (WP-1.2)
+- `:core:sync` — backup/export/import cifrato (WP-6.1)
+- `:feature:*` — una feature per modulo (finance, diet, work, wearable)
+- `:konsist-tests` — test di architettura che fanno rispettare le regole di dipendenza tra moduli
 
 ## Sviluppo
 Il progetto è sviluppato da agent LLM (Claude Code, Codex, Antigravity 2.0)

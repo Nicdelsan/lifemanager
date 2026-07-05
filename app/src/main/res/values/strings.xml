@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LifeManager</string>
+    <string name="dashboard_title">Dashboard</string>
+    <string name="dashboard_empty_title">Nessuna funzionalità attiva</string>
+    <string name="dashboard_empty_description">Le funzionalità verranno aggiunte nelle prossime fasi di sviluppo.</string>
+</resources>
