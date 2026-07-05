@@ -8,6 +8,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
+import kotlin.reflect.KClass
 
 /**
  * Wraps WorkManager behind [BackgroundScheduler] so feature modules only ever see
@@ -20,7 +21,7 @@ class WorkManagerBackgroundScheduler(
 
     override fun schedulePeriodic(request: PeriodicWorkRequest) {
         val workRequest = androidx.work.PeriodicWorkRequest.Builder(
-            request.workerClass.java as Class<out CoroutineWorker>,
+            request.workerClass.asCoroutineWorkerClass(),
             request.repeatIntervalMinutes,
             TimeUnit.MINUTES,
         )
@@ -35,7 +36,7 @@ class WorkManagerBackgroundScheduler(
     }
 
     override fun scheduleOneOff(request: OneOffWorkRequest) {
-        val workRequest = OneTimeWorkRequest.Builder(request.workerClass.java as Class<out CoroutineWorker>)
+        val workRequest = OneTimeWorkRequest.Builder(request.workerClass.asCoroutineWorkerClass())
             .setInitialDelay(request.initialDelayMinutes, TimeUnit.MINUTES)
             .setConstraints(
                 Constraints.Builder()
@@ -60,4 +61,12 @@ class WorkManagerBackgroundScheduler(
             .setRequiredNetworkType(if (requiresNetwork) NetworkType.CONNECTED else NetworkType.NOT_REQUIRED)
             .setRequiresCharging(requiresCharging)
             .build()
+
+    @Suppress("UNCHECKED_CAST")
+    private fun KClass<*>.asCoroutineWorkerClass(): Class<out CoroutineWorker> {
+        require(CoroutineWorker::class.java.isAssignableFrom(this.java)) {
+            "${this.qualifiedName} must extend CoroutineWorker to be scheduled via BackgroundScheduler."
+        }
+        return this.java as Class<out CoroutineWorker>
+    }
 }

@@ -20,3 +20,16 @@ all'Agente Architect, non modificato direttamente.
 
 Eseguito in CI come step dedicato (`.github/workflows/ci.yml`) oltre che
 come parte di `./gradlew test`.
+
+## Limite noto e controllo complementare
+Konsist analizza gli **import nel codice sorgente**, non il grafo delle
+dipendenze Gradle: una `implementation(project(":feature:x"))` dichiarata
+ma non ancora usata da nessun import non verrebbe rilevata da questo test.
+Per questo `build.gradle.kts` (root) ha un check separato in un blocco
+`allprojects { afterEvaluate { ... } }` che ispeziona le `configurations`
+reali di ogni modulo `core:*`/`feature:*` e fallisce a livello di
+configurazione Gradle (quindi su qualsiasi invocazione, non solo
+`./gradlew test`) se trova una `ProjectDependency` vietata. I due controlli
+sono complementari: quello Gradle copre la regola sui moduli, Konsist copre
+lo stile e resta pronto per regole più fini (naming, annotazioni, ecc.) in
+WP futuri.

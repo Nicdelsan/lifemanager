@@ -13,7 +13,8 @@ personale: wearable e parametri corporei, dieta e idratazione, lavoro
 ## Setup ambiente (Windows)
 1. JDK 17 (Temurin) — `java -version` deve rispondere 17.x
 2. Android Studio + SDK, variabile ANDROID_HOME (o `local.properties` → `sdk.dir`) impostata
-   - Platform richiesta: compileSdk 36, minSdk 26
+   - Platform richiesta: compileSdk 37, minSdk 26 (vedi ADR-001 per il perché
+     di 37 e non 36)
 3. Verifica: `./gradlew build` da terminale deve essere verde
 
 ## Comandi utili
