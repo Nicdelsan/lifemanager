@@ -16,3 +16,9 @@
 - Compose preview/tooling per i moduli KMP Android (dipendenza
   `androidRuntimeClasspath`) non ancora cablata: serve a WP-1.1 per il
   catalogo componenti in debug.
+- Test negativo automatico (Gradle TestKit) che dimostri in CI il
+  fallimento di `feature:*->feature:*` e `core:*->feature:*`. Il check in
+  `build.gradle.kts` root (REVIEW-WP-0.1, punto 2) è stato verificato solo
+  manualmente (dipendenza vietata aggiunta e rimossa a mano). Un test
+  TestKit che lancia una build di progetto sintetico con la violazione e
+  ne asserisce il fallimento darebbe copertura reale in CI.
