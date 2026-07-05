@@ -5,3 +5,14 @@
 - Target iOS / Web WASM
 - Widget home screen Android, app companion Wear OS
 - Import estratti conto bancari (CSV/OFX)
+
+## Emerse durante WP-0.1
+- `com.android.kotlin.multiplatform.library` (nuovo plugin KMP Android
+  richiesto da AGP 9, vedi ADR-001) supporta una sola variante di build
+  (niente debug/release flavor) per `core:*`/`feature:*`. Se una feature
+  futura avesse bisogno di varianti (es. mock di Health Connect in debug),
+  va rivalutata l'architettura del modulo interessato — non risolvere
+  aggirando il vincolo con hack locali.
+- Compose preview/tooling per i moduli KMP Android (dipendenza
+  `androidRuntimeClasspath`) non ancora cablata: serve a WP-1.1 per il
+  catalogo componenti in debug.
