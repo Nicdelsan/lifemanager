@@ -43,9 +43,20 @@ kotlin {
 }
 
 dependencies {
+    // :app depends on every core/feature module per implementation-plan.md
+    // §3.1 ("app dipende da tutto ed è l'unico punto in cui le feature
+    // vengono composte"), even before a module has real content, so a
+    // feature WP only ever needs its own module plus the one-line
+    // FeatureModuleRegistry entry (never a change here).
     implementation(project(":core:designsystem"))
     implementation(project(":core:common"))
     implementation(project(":core:dashboard-api"))
+    implementation(project(":core:database"))
+    implementation(project(":core:sync"))
+    implementation(project(":feature:finance"))
+    implementation(project(":feature:diet"))
+    implementation(project(":feature:work"))
+    implementation(project(":feature:wearable"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

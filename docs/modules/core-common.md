@@ -12,7 +12,12 @@ Utility condivise senza dipendenze da feature o da altri moduli `core`.
   dipendono mai da WorkManager direttamente. Implementazione Android:
   `WorkManagerBackgroundScheduler`, sempre con `uniqueName` + constraint
   espliciti (mai polling, per il vincolo batteria di implementation-plan.md
-  §1).
+  §1). `PeriodicWorkRequest`/`OneOffWorkRequest` portano un `workerClass:
+  KClass<*>` (deve restare multiplatform-safe in `commonMain`); l'impl
+  Android valida a runtime che la classe estenda `CoroutineWorker`
+  (`require` con messaggio esplicito) prima di castare, per non lasciare
+  un `ClassCastException` criptico a una feature che passa la classe
+  sbagliata.
 
 ## Stack
 Kotlin Multiplatform (target `android` + `desktop` dichiarato, senza
