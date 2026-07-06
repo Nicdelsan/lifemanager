@@ -22,3 +22,11 @@
   manualmente (dipendenza vietata aggiunta e rimossa a mano). Un test
   TestKit che lancia una build di progetto sintetico con la violazione e
   ne asserisce il fallimento darebbe copertura reale in CI.
+
+## Emerse durante WP-1.2
+- `androidx.security.crypto:1.1.0` (`EncryptedSharedPreferences`/`MasterKey`),
+  usato in `:core:database` per la passphrase SQLCipher, è ufficialmente
+  deprecato (soft, nessuna rimozione annunciata) in favore di
+  DataStore + Tink + Android Keystore. Migrazione non fatta in WP-1.2 (Tink
+  non è nel version catalog, fuori perimetro); rivalutare con ADR quando si
+  tocca di nuovo questo modulo. Vedi ADR-003.
