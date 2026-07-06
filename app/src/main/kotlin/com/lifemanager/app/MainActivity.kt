@@ -23,6 +23,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     dashboardGraph()
+                    designSystemCatalogDebugGraph()
                     FeatureModuleRegistry.modules.forEach { module ->
                         module.navGraph(this, navController)
                     }
