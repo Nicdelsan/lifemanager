@@ -1,0 +1,70 @@
+package com.lifemanager.database
+
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
+import kotlinx.coroutines.flow.first
+import kotlinx.serialization.Serializable
+
+/**
+ * JSON-serializable snapshot of a `DataStore<Preferences>`, attached alongside the encrypted
+ * DB file on export (implementation-plan.md §5 WP-1.2). Each entry keeps a type tag because
+ * `Preferences` erases it on disk — without the tag, re-importing a `Long` could come back
+ * as a `String` and silently break a feature reading it later.
+ */
+@Serializable
+data class SettingsSnapshot(val entries: Map<String, SettingsEntry>)
+
+/**
+ * [value] holds the scalar types (STRING/INT/LONG/FLOAT/BOOLEAN); [values] holds STRING_SET.
+ * Kept as two separate fields — rather than joining set elements into one delimited [value]
+ * string — because a `Preferences` string set element is an arbitrary string: it may be empty
+ * or contain any character, including whatever delimiter a join would pick, which made the
+ * previous single-string encoding lossy (found in WP-1.2 review). A JSON array element has no
+ * such collision.
+ */
+@Serializable
+data class SettingsEntry(val type: SettingsValueType, val value: String? = null, val values: List<String>? = null)
+
+enum class SettingsValueType { STRING, INT, LONG, FLOAT, BOOLEAN, STRING_SET }
+
+suspend fun Preferences.toSettingsSnapshot(): SettingsSnapshot {
+    val entries = asMap().mapNotNull { (key, value) ->
+        val entry = when (value) {
+            is String -> SettingsEntry(SettingsValueType.STRING, value = value)
+            is Int -> SettingsEntry(SettingsValueType.INT, value = value.toString())
+            is Long -> SettingsEntry(SettingsValueType.LONG, value = value.toString())
+            is Float -> SettingsEntry(SettingsValueType.FLOAT, value = value.toString())
+            is Boolean -> SettingsEntry(SettingsValueType.BOOLEAN, value = value.toString())
+            is Set<*> -> SettingsEntry(SettingsValueType.STRING_SET, values = value.map { it as String })
+            else -> null
+        }
+        entry?.let { key.name to it }
+    }.toMap()
+    return SettingsSnapshot(entries)
+}
+
+suspend fun androidx.datastore.core.DataStore<Preferences>.restoreFromSnapshot(snapshot: SettingsSnapshot) {
+    edit { prefs ->
+        prefs.clear()
+        snapshot.entries.forEach { (name, entry) ->
+            when (entry.type) {
+                SettingsValueType.STRING -> prefs[stringPreferencesKey(name)] = requireNotNull(entry.value)
+                SettingsValueType.INT -> prefs[intPreferencesKey(name)] = requireNotNull(entry.value).toInt()
+                SettingsValueType.LONG -> prefs[longPreferencesKey(name)] = requireNotNull(entry.value).toLong()
+                SettingsValueType.FLOAT -> prefs[floatPreferencesKey(name)] = requireNotNull(entry.value).toFloat()
+                SettingsValueType.BOOLEAN -> prefs[booleanPreferencesKey(name)] = requireNotNull(entry.value).toBoolean()
+                SettingsValueType.STRING_SET -> prefs[stringSetPreferencesKey(name)] =
+                    (entry.values ?: emptyList()).toSet()
+            }
+        }
+    }
+}
+
+internal suspend fun androidx.datastore.core.DataStore<Preferences>.currentSnapshot(): SettingsSnapshot =
+    data.first().toSettingsSnapshot()

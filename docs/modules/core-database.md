@@ -1,11 +1,130 @@
 # :core:database
 
-**Scheletro vuoto da WP-0.1.** Solo modulo Gradle (KMP, target `android` +
-`desktop` dichiarato) senza Room, senza cifratura, senza migrazioni: tutto
-il contenuto reale (RoomDatabase + SQLCipher, convenzioni `BaseEntity` da
-implementation-plan.md §3.3, export/import locale) è responsabilità di
-WP-1.2.
+RoomDatabase KMP cifrato (SQLCipher) + convenzioni schema §3.3 + punto di
+estensione migrazioni per le feature. Non contiene nessuna classe `@Database`
+concreta: quella con `entities = [...]` di tutte le feature va assemblata in
+`:app` (unico modulo che può dipendere da tutte le feature, §3.1) — vedi
+ADR-003.
 
-Il file placeholder `Database.kt` esiste solo per soddisfare il vincolo di
-Konsist "ogni layer architetturale deve contenere almeno un file" (vedi
-`:konsist-tests`); WP-1.2 lo sostituisce con contenuto reale.
+## Convenzioni schema (§3.3)
+
+`BaseEntity` (`commonMain`) fissa i quattro campi obbligatori di ogni tabella:
+`id` (UUID v4 string, mai autoincrement), `createdAt`/`updatedAt`/`deletedAt`
+(epoch millis UTC, `Long`/`Long?`).
+
+**Importante**: Kotlin non propaga le annotazioni attraverso `override`, quindi
+ogni `@Entity` concreta deve ridichiarare `@PrimaryKey override val id: String`
+— ereditare solo il campo da `BaseEntity` non basta, KSP rifiuta l'entità
+altrimenti ("must have at least 1 property annotated with @PrimaryKey",
+trovato empiricamente in questo WP). Esempio minimo:
+
+```kotlin
+@Entity(tableName = "finance_transaction")
+data class FinanceTransactionEntity(
+    @PrimaryKey override val id: String,
+    override val createdAt: Long,
+    override val updatedAt: Long,
+    override val deletedAt: Long?,
+    val amountCents: Long,
+) : BaseEntity(id, createdAt, updatedAt, deletedAt)
+```
+
+`InstantConverters` converte `kotlin.time.Instant` ↔ `Long` per i DAO che
+preferiscono lavorare con `Instant` invece del `Long` grezzo (le colonne
+restano sempre `Long` — la conversione è solo per la firma dei metodi DAO).
+Va registrato esplicitamente con `@TypeConverters(InstantConverters::class)`
+dove serve.
+
+## Database cifrato
+
+`buildEncryptedRoomDatabase<T>(context, klass, databaseName, passphrase, migrations)`
+(`androidMain`) è il "builder centrale": incapsula
+`Room.databaseBuilder(...).openHelperFactory(SupportOpenHelperFactory(passphrase))`
+(`net.zetetic:sqlcipher-android`). Ogni feature/WP-2.1+ lo richiama dal punto
+in cui assembla la propria/la concreta `@Database`. Vedi ADR-003 per la scelta
+dell'artefatto SQLCipher e i problemi runtime trovati (native lib da caricare
+esplicitamente, packaging, ecc.).
+
+`DatabasePassphraseManager` genera una passphrase casuale a 32 byte al primo
+avvio e la persiste in `EncryptedSharedPreferences` (chiave AES-256-GCM in
+Android Keystore via `MasterKey`). Nota: `androidx.security.crypto` è
+soft-deprecato (vedi `docs/backlog.md`); non prevista un fix ora nel perimetro
+di WP-1.2.
+
+`getOrCreatePassphrase()` sincronizza il read-generate-write su un lock di
+classe (non di istanza): due primi accessi concorrenti, ciascuno con il
+proprio `DatabasePassphraseManager`, potrebbero altrimenti leggere entrambi
+`null`, generare passphrase diverse e correre su quale viene persistita per
+ultima — un DB creato con quella "perdente" diventa illeggibile per sempre.
+La scrittura usa `commit()` (bloccante) invece di `apply()`, così la
+passphrase è su disco prima che qualunque chiamante possa usarla per aprire
+un DB. Trovato in REVIEW-WP-1.2 (request-changes P1); regressione coperta da
+`DatabasePassphraseManagerTest.concurrentFirstAccessAcrossThreadsReturnsTheSamePassphrase`.
+
+## Estensione migrazioni
+
+`FeatureMigrationProvider` (`commonMain`, `fun interface`) è il punto di
+estensione per le migrazioni: una feature implementa l'interfaccia e la
+registra nel proprio modulo Koin (`single { ... } bind FeatureMigrationProvider::class`).
+Chi assembla la `@Database` concreta (`:app`) colleziona tutti i provider
+bindati (`getKoin().getAll<FeatureMigrationProvider>()`), appiattisce la lista
+di `Migration` e la passa a `buildEncryptedRoomDatabase`. Nessuna feature
+modifica un file condiviso per registrare una migrazione.
+
+## Export/import locale
+
+`DatabaseBackupManager` (`androidMain`):
+- `export(database, databaseFile, settings, destination: DocumentFile)` —
+  chiude `database`, copia il file cifrato e un JSON delle impostazioni
+  (`SettingsSnapshot`) nella cartella `destination` (risolta dal chiamante
+  via SAF, `DocumentFile.fromTreeUri` dopo il picker "apri cartella").
+- `import(source: DocumentFile, destinationDatabaseFile, settings, existingDatabase?)` —
+  operazione inversa; chiude `existingDatabase` se il file di destinazione è
+  già aperto.
+
+`SettingsSnapshot`/`SettingsEntry` (`androidMain`) serializzano un
+`DataStore<Preferences>` in JSON con un tag di tipo esplicito per entry
+(`STRING`/`INT`/`LONG`/`FLOAT`/`BOOLEAN`/`STRING_SET`), perché `Preferences`
+cancella il tipo su disco. `SettingsEntry` ha due campi separati — `value`
+per gli scalari, `values: List<String>` per `STRING_SET` — invece di unire
+gli elementi del set in un'unica stringa delimitata: un elemento di uno
+`Set<String>` di `Preferences` è una stringa arbitraria (può essere vuota o
+contenere qualunque carattere, incluso il delimiter scelto), quindi la
+codifica a stringa singola era lossy (trovato in REVIEW-WP-1.2,
+request-changes P2). Un elemento di array JSON non ha questo problema.
+Casi limite coperti da `SettingsSnapshotTest`.
+
+I file di backup usano il MIME type generico `"*/*"`: alcuni backend SAF
+appendono l'estensione associata al MIME type passato a `createFile()` anche
+quando il nome ce l'ha già (osservato: `application/octet-stream` →
+`<nome>.bin`), rompendo la lookup per nome esatto in fase di import — vedi
+ADR-003.
+
+## Test
+
+I test di cifratura reale vivono in `androidDeviceTest` (device/emulatore),
+non in un host test Robolectric: SQLCipher ha librerie native solo Android,
+non caricabili su una JVM host. Copertura:
+- `EncryptedDatabaseTest` — file illeggibile senza passphrase (apertura SQLite
+  raw fallisce), leggibile con quella corretta.
+- `BackupRoundTripTest` — round-trip export → wipe locale → import, DB e
+  settings entrambi ripristinati.
+- `MigrationExtensionPointTest` — un `FeatureMigrationProvider` applicato
+  tramite `buildEncryptedRoomDatabase` sopravvive a un upgrade di versione.
+- `DatabasePassphraseManagerTest` — la passphrase è stabile tra istanze,
+  una nuova istanza la vede subito dopo la prima generazione, e accessi
+  concorrenti da 16 thread al primo avvio restituiscono tutti la stessa
+  passphrase.
+- `SettingsSnapshotTest` — round-trip di tutti i tipi supportati; `STRING_SET`
+  con stringa vuota, con elementi contenenti il vecchio delimiter, e set
+  vuoto.
+
+Eseguiti con `./gradlew :core:database:connectedAndroidDeviceTest` su device
+reale connesso.
+
+## Decisioni
+
+- ADR-003 — artefatto SQLCipher (`net.zetetic:sqlcipher-android`), percorso
+  di integrazione con Room KMP (`openHelperFactory` legacy, non il nuovo
+  `SQLiteDriver`), design del punto di estensione multi-modulo, problemi
+  runtime trovati eseguendo i test su device reale.
