@@ -25,20 +25,33 @@ class DatabasePassphraseManager(context: Context) {
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
     )
 
-    fun getOrCreatePassphrase(): ByteArray {
+    /**
+     * Read-generate-write is synchronized on [LOCK] (class-wide, not per-instance) because two
+     * concurrent first-access callers — each with their own [DatabasePassphraseManager] — could
+     * otherwise both read `null`, generate different passphrases, and race on which one gets
+     * persisted last; a DB opened with the "losing" passphrase becomes permanently unreadable.
+     * The write itself uses [android.content.SharedPreferences.Editor.commit] (blocking) instead
+     * of `apply()` so the passphrase is durably on disk before any caller can use it to open a
+     * database — `apply()` schedules the disk write asynchronously and returns immediately.
+     */
+    fun getOrCreatePassphrase(): ByteArray = synchronized(LOCK) {
         preferences.getString(KEY_PASSPHRASE, null)?.let { encoded ->
-            return Base64.decode(encoded, Base64.NO_WRAP)
+            return@synchronized Base64.decode(encoded, Base64.NO_WRAP)
         }
         val generated = ByteArray(PASSPHRASE_LENGTH_BYTES).also { SecureRandom().nextBytes(it) }
-        preferences.edit()
+        val persisted = preferences.edit()
             .putString(KEY_PASSPHRASE, Base64.encodeToString(generated, Base64.NO_WRAP))
-            .apply()
-        return generated
+            .commit()
+        check(persisted) { "Failed to persist the SQLCipher passphrase" }
+        generated
     }
 
-    private companion object {
+    companion object {
+        // Public so tests can reset state via `context.deleteSharedPreferences(...)`; the file
+        // name itself is not sensitive.
         const val PREFS_FILE_NAME = "lifemanager_db_passphrase"
-        const val KEY_PASSPHRASE = "passphrase"
-        const val PASSPHRASE_LENGTH_BYTES = 32
+        private const val KEY_PASSPHRASE = "passphrase"
+        private const val PASSPHRASE_LENGTH_BYTES = 32
+        private val LOCK = Any()
     }
 }

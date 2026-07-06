@@ -51,6 +51,16 @@ Android Keystore via `MasterKey`). Nota: `androidx.security.crypto` è
 soft-deprecato (vedi `docs/backlog.md`); non prevista un fix ora nel perimetro
 di WP-1.2.
 
+`getOrCreatePassphrase()` sincronizza il read-generate-write su un lock di
+classe (non di istanza): due primi accessi concorrenti, ciascuno con il
+proprio `DatabasePassphraseManager`, potrebbero altrimenti leggere entrambi
+`null`, generare passphrase diverse e correre su quale viene persistita per
+ultima — un DB creato con quella "perdente" diventa illeggibile per sempre.
+La scrittura usa `commit()` (bloccante) invece di `apply()`, così la
+passphrase è su disco prima che qualunque chiamante possa usarla per aprire
+un DB. Trovato in REVIEW-WP-1.2 (request-changes P1); regressione coperta da
+`DatabasePassphraseManagerTest.concurrentFirstAccessAcrossThreadsReturnsTheSamePassphrase`.
+
 ## Estensione migrazioni
 
 `FeatureMigrationProvider` (`commonMain`, `fun interface`) è il punto di
@@ -75,7 +85,14 @@ modifica un file condiviso per registrare una migrazione.
 `SettingsSnapshot`/`SettingsEntry` (`androidMain`) serializzano un
 `DataStore<Preferences>` in JSON con un tag di tipo esplicito per entry
 (`STRING`/`INT`/`LONG`/`FLOAT`/`BOOLEAN`/`STRING_SET`), perché `Preferences`
-cancella il tipo su disco.
+cancella il tipo su disco. `SettingsEntry` ha due campi separati — `value`
+per gli scalari, `values: List<String>` per `STRING_SET` — invece di unire
+gli elementi del set in un'unica stringa delimitata: un elemento di uno
+`Set<String>` di `Preferences` è una stringa arbitraria (può essere vuota o
+contenere qualunque carattere, incluso il delimiter scelto), quindi la
+codifica a stringa singola era lossy (trovato in REVIEW-WP-1.2,
+request-changes P2). Un elemento di array JSON non ha questo problema.
+Casi limite coperti da `SettingsSnapshotTest`.
 
 I file di backup usano il MIME type generico `"*/*"`: alcuni backend SAF
 appendono l'estensione associata al MIME type passato a `createFile()` anche
@@ -94,7 +111,13 @@ non caricabili su una JVM host. Copertura:
   settings entrambi ripristinati.
 - `MigrationExtensionPointTest` — un `FeatureMigrationProvider` applicato
   tramite `buildEncryptedRoomDatabase` sopravvive a un upgrade di versione.
-- `DatabasePassphraseManagerTest` — la passphrase è stabile tra istanze.
+- `DatabasePassphraseManagerTest` — la passphrase è stabile tra istanze,
+  una nuova istanza la vede subito dopo la prima generazione, e accessi
+  concorrenti da 16 thread al primo avvio restituiscono tutti la stessa
+  passphrase.
+- `SettingsSnapshotTest` — round-trip di tutti i tipi supportati; `STRING_SET`
+  con stringa vuota, con elementi contenenti il vecchio delimiter, e set
+  vuoto.
 
 Eseguiti con `./gradlew :core:database:connectedAndroidDeviceTest` su device
 reale connesso.
